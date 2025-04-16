@@ -1,71 +1,67 @@
+# tests/test_admin_private.py
+
 import pytest
-from unittest.mock import MagicMock
-from aiogram import types  # Import types from aiogram
-from aiogram.dispatcher import Dispatcher
-from aiogram.filters import StateFilter
-from aiogram.fsm.context import FSMContext
-from handlers.admin_private import add_product  # Corrected import
+from unittest.mock import MagicMock, AsyncMock # Додав AsyncMock про всяк випадок
+from aiogram import types
+# Видали цей рядок:
+# from aiogram.dispatcher import Dispatcher
+from aiogram.filters import StateFilter # Це коректний імпорт для v3
+from aiogram.fsm.context import FSMContext # Це коректний імпорт для v3
 
-# Фікстури для мокання об'єктів
-@pytest.fixture
-def mock_update():
-    """Фікстура для створення мок-об'єкта Update."""
-    update = MagicMock(spec=types.Update)
-    update.message = MagicMock(spec=types.Message)
-    update.message.chat = MagicMock(spec=types.Chat)
-    update.message.from_user = MagicMock(spec=types.User)
-    return update
+# Важливо: Перевір шлях імпорту до твого admin_private!
+# Якщо він у папці handlers:
+from handlers.admin_private import add_product, AddTeachers # Імпортуємо також клас стану
+
+# --- Змінимо фікстури та тест для більшої відповідності aiogram v3 ---
 
 @pytest.fixture
-def mock_context():
-    """Фікстура для створення мок-об'єкта CallbackContext."""
-    context = MagicMock(spec=FSMContext)
-    context.chat_data = {}
-    return context
+def mock_message(mocker): # Перейменуємо і спростимо
+    """Фікстура для створення мок-об'єкта Message."""
+    message = mocker.MagicMock(spec=types.Message)
+    message.chat = mocker.MagicMock(spec=types.Chat)
+    message.from_user = mocker.MagicMock(spec=types.User)
+    # Імітуємо метод answer як асинхронний
+    message.answer = AsyncMock()
+    return message
 
 @pytest.fixture
-def mock_bot():
-    """Фікстура для створення мок-об'єкта Bot."""
-    bot = MagicMock()
-    return bot
+def mock_state(mocker): # Перейменуємо
+    """Фікстура для створення мок-об'єкта FSMContext."""
+    state = mocker.MagicMock(spec=FSMContext)
+    # Імітуємо set_state як асинхронний
+    state.set_state = AsyncMock()
+    # Якщо твій код використовує update_data або get_data, їх теж треба зробити AsyncMock
+    # state.update_data = AsyncMock(return_value={})
+    # state.get_data = AsyncMock(return_value={})
+    return state
 
-@pytest.fixture
-def mock_dispatcher():
-    """Фікстура для створення мок-об'єкта Dispatcher."""
-    dp = MagicMock()
-    return dp
+# Фікстури mock_bot та mock_dispatcher не потрібні для цього тесту,
+# бо add_product приймає лише message і state
 
-# Тест для функції add_product
+# --- Виправлений тест ---
+
 @pytest.mark.asyncio
-async def test_add_product(mock_update, mock_context, mock_bot, mock_dispatcher):
+# ↓↓↓ Використовуємо оновлені фікстури ↓↓↓
+async def test_add_product_starts_correctly(mock_message, mock_state):
     """
-    Тестує функцію add_product з файлу admin_private.py.
-
-    Перевіряє, чи правильно додається викладач до контексту,
-    а також обробку помилок при некоректному введенні даних.
+    Тестує початковий виклик функції add_product.
+    Перевіряє правильність відповіді та встановлення стану.
     """
-    # Задаємо текст повідомлення з коректними даними викладача
-    mock_update.message.text = "Додати інфо-картку"
-    mock_update.message.chat.id = 12345
-    mock_update.message.from_user.id = 54321
+    # Arrange
+    # Задаємо текст повідомлення (хоча для add_product він не використовується,
+    # бо це обробник команди або конкретного тексту, наприклад "Додати інфо-картку")
+    mock_message.text = "Додати інфо-картку" # Або текст твоєї команди/фільтра
+    mock_message.chat.id = 12345
+    mock_message.from_user.id = 54321
 
-    # Mocking необхідних методів
-    mock_context.bot = mock_bot
-    mock_context._dispatcher = mock_dispatcher
+    # Act
+    # ↓↓↓ Викликаємо функцію з правильними аргументами ↓↓↓
+    await add_product(mock_message, mock_state)
 
-    # Створюємо екземпляр StateFilter
-    state_filter = StateFilter(None)
-
-    # Припускаємо, що  state.set_state повертає awaitable
-    mock_context.set_state.return_value = None  # або awaitable об'єкт, якщо потрібно
-
-    # Викликаємо функцію add_product
-    await add_product(mock_update, mock_context)
-
-    # Перевіряємо, чи викликався метод answer з правильним повідомленням
-    mock_update.message.answer.assert_called_once_with(
+    # Assert
+    # ↓↓↓ Перевіряємо виклик mock_message.answer ↓↓↓
+    mock_message.answer.assert_called_once_with(
         "Введіть ПІБ викладача", reply_markup=types.ReplyKeyboardRemove()
     )
-    # Перевіряємо, чи викликався метод set_state з правильним станом
-    mock_context.set_state.assert_called_once()
-    assert mock_context.set_state.call_args[0][0].state == "AddTeachers:full_name"
+    # ↓↓↓ Перевіряємо виклик mock_state.set_state ↓↓↓
+    mock_state.set_state.assert_called_once_with(AddTeachers.full_name)
